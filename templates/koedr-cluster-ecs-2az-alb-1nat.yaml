@@ -1,0 +1,664 @@
+AWSTemplateFormatVersion: '2010-09-09'
+################################################################################
+#
+#   DESCRIPTION
+#   EC2 ECS cluster running containers in a private subnet. Supports public 
+#   facing load balancers, private internal load balancers, and both internal 
+#   and external service discovery namespaces. Two AZs.   
+################################################################################
+Description: >-
+  EC2 ECS cluster running containers in a private subnet. Supports public facing 
+  load balancers, private internal load balancers, and both internal and 
+  external service discovery namespaces. Two AZs.
+################################################################################
+#
+#   PARAMETERS
+#   Values to pass to your template at runtime (when you create or update a
+#   stack). You can refer to parameters from the Resources and Outputs sections
+#   of the template.
+#
+################################################################################
+Parameters:
+  pAvailability:
+    Type: String
+    Description: >-
+      An identifier for the specific data availability level a resource
+      supports. A loss of availability is the loss of access to or use of a
+      workload.
+    AllowedValues:
+      - LOW
+      - MODERATE
+      - HIGH
+    Default: HIGH
+  pConfidentiality:
+    Type: String
+    Description: >-
+      An identifier for the specific data confidentiality level a resource
+      supports. A loss of confidentiality is the disclosure of information to
+      actors who are not authorized to access the information.
+    AllowedValues:
+      - LOW
+      - MODERATE
+      - HIGH
+    Default: HIGH
+  pCostCenter:
+    Type: String
+    Description: >-
+      Identify the cost centre or business unit associated with a resource
+    AllowedValues:
+      - BU001
+      - BU002
+    Default: BU002
+  pCustomer:
+    Type: String
+    Description: >-
+      Identify a specific client that a particular group of resources serves.
+    MaxLength: 256
+    Default: Koedr Studios Pty Ltd
+  pEnvironment:
+    Type: String
+    Description: Distinguish between development, test, and production resources.
+    AllowedValues:
+      - dev
+      - stg
+      - prd
+      - sbx
+    Default: sbx
+  pIntegrity:
+    Type: String
+    Description: >-
+      An identifier for the specific data integrity level a resource supports.
+      A loss of integrity is the modification or destruction of information by
+      actors who are not authorized to modify or destroy the information.
+    AllowedValues:
+      - LOW
+      - MODERATE
+      - HIGH
+    Default: HIGH
+  pOwner:
+    Type: String
+    Description: >-
+      Identifies who is responsible for the resource. Identify the human being
+      who is responsible for the resource, this should be an email address.
+    AllowedPattern: '[^@]+@[^@]+\.[^@]+'
+    ConstraintDescription: The owner should be an email address
+  pProject:
+    Type: String
+    Description: >-
+      Identify projects that the resource supports. this should always be
+      lowercase. Any whitespace in the project name should be removed. Do not
+      use hyphens or underscores to separate words in the project name.
+  pVersion:
+    Type: String
+    Description: >-
+      Help distinguish between versions of resources or applications. Increment
+      the major, minor or patch number given a version number MAJOR.MINOR.PATCH.
+    Default: 0.0.0
+  pInstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t3.micro
+    Description: >- 
+      Class of EC2 instance used to host containers. Choose t3 for testing, m5 for 
+      general purpose, c5 for CPU intensive services, and r5 for memory intensive. 
+      services.
+    AllowedValues: [ t2.micro, t3.micro]
+    ConstraintDescription: Please choose a valid instance type.
+  pDesiredCapacity:
+    Type: Number
+    Default: '2'
+    Description: >- 
+      Number of EC2 instances to launch in your ECS cluster.
+  pMaxSize:
+    Type: Number
+    Default: '4'
+    Description: >- 
+      Maximum number of EC2 instances that can be launched in your ECS cluster.
+  pECSAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+    Description: >-
+      The Amazon Machine Image ID used for the cluster, leave it as the default value 
+      to get the latest AMI.
+
+################################################################################
+#
+#   METADATA
+#   Objects that provide additional information about the template.
+#
+################################################################################
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Security
+        Parameters:
+          - pAvailability
+          - pConfidentiality
+          - pIntegrity
+      - Label:
+          default: Cost Management
+        Parameters:
+          - pCostCenter
+          - pCustomer
+      - Label:
+          default: Operations
+        Parameters:
+          - pEnvironment
+          - pOwner
+          - pProject
+          - pVersion
+          - pECSAMI
+          - pMaxSize
+          - pDesiredCapacity
+          - pInstanceType          
+    ParameterLabels:
+      pAvailability:
+        default: Availability
+      pConfidentiality:
+        default: Confidentiality
+      pCostCenter:
+        default: Cost Center
+      pCustomer:
+        default: Customer
+      pEnvironment:
+        default: Environment
+      pIntegrity:
+        default: Integrity
+      pOwner:
+        default: Owner
+      pProject:
+        default: Project Name
+      pVersion:
+        default: Version
+      pInstanceType:
+        default: Instance Type        
+      pDesiredCapacity:
+        default: Desired Capacity
+      pMaxSize:
+        default: Maximum Size
+      pECSAMI:
+        default: ECS AMI                        
+
+################################################################################
+#
+#   Mappings
+#   Hard values for the subnet masks. These masks define the range of internal 
+#   IP addresses that can be assigned.
+#   The VPC can have all IP's from 10.0.0.0 to 10.0.255.255
+#   There are four subnets which cover the ranges:
+#
+#   10.0.0.0 - 10.0.0.255
+#   10.0.1.0 - 10.0.1.255
+#   10.0.2.0 - 10.0.2.255
+#   10.0.3.0 - 10.0.3.255
+#
+#   If you need more IP addresses (perhaps you have so many
+#   instances that you run out) then you can customize these ranges to add more    
+#
+################################################################################
+Mappings:
+  SubnetConfig:
+    VPC:
+      CIDR: '10.0.0.0/16'
+    PublicOne:
+      CIDR: '10.0.0.0/24'
+    PublicTwo:
+      CIDR: '10.0.1.0/24'
+    PrivateOne:
+      CIDR: '10.0.100.0/24'
+    PrivateTwo:
+      CIDR: '10.0.101.0/24'
+################################################################################
+#
+#   RESOURCES
+#   Specifies the stack resources and their properties. You can refer to
+#   resources in the Resources and Outputs sections of the template.
+#
+################################################################################
+Resources:
+  # VPC in which containers will be networked.
+  # It has two public subnets, and two private subnets.
+  # We distribute the subnets across the first two available subnets
+  # for the region, for high availability.
+  rVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: tru\
+      EnableDnsHostnames: true
+      CidrBlock: !FindInMap ['SubnetConfig', 'VPC', 'CIDR']
+      Tags:
+        - Key: Availability
+          Value: !Ref pAvailability
+        - Key: Confidentiality
+          Value: !Ref pConfidentiality
+        - Key: CostCenter
+          Value: !Ref pCostCenter
+        - Key: Customer
+          Value: !Ref pCustomer
+        - Key: Environment
+          Value: !Ref pEnvironment
+        - Key: Integrity
+          Value: !Ref pIntegrity
+        - Key: Owner
+          Value: !Ref pOwner
+        - Key: Project
+          Value: !Ref pProject
+        - Key: Version
+          Value: !Ref pVersion
+
+  rVPCParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Description: VPC ID
+      Name: vpc
+      Type: String
+      Value: !Ref rVPC  
+
+  # Two public subnets, where containers can have public IP addresses
+  rPublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      VpcId: !Ref 'rVPC'
+      CidrBlock: !FindInMap ['SubnetConfig', 'PublicOne', 'CIDR']
+      MapPublicIpOnLaunch: true
+
+  rPublicSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      VpcId: !Ref 'rVPC'
+      CidrBlock: !FindInMap ['SubnetConfig', 'PublicTwo', 'CIDR']
+      MapPublicIpOnLaunch: true
+
+  # Two private subnets where containers will only have private
+  # IP addresses, and will only be reachable by other members of the
+  # VPC
+  rPrivateSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      VpcId: !Ref 'rVPC'
+      CidrBlock: !FindInMap ['SubnetConfig', 'PrivateOne', 'CIDR']
+
+  rPrivateSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      VpcId: !Ref 'rVPC'
+      CidrBlock: !FindInMap ['SubnetConfig', 'PrivateTwo', 'CIDR']
+
+  # Setup networking resources for the public subnets. Containers
+  # in the public subnets have public IP addresses and the routing table
+  # sends network traffic via the internet gateway.
+  rInternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  rGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref 'rVPC'
+      InternetGatewayId: !Ref 'rInternetGateway'
+
+  rPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'rVPC'
+
+  rPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: rGatewayAttachment
+    Properties:
+      RouteTableId: !Ref 'rPublicRouteTable'
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref 'rInternetGateway'
+
+  rPublicSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rPublicSubnetOne
+      RouteTableId: !Ref rPublicRouteTable
+
+  rPublicSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rPublicSubnetTwo
+      RouteTableId: !Ref rPublicRouteTable
+
+  # Setup networking resources for the private subnets. Containers
+  # in these subnets have only private IP addresses, and must use a NAT
+  # gateway to talk to the internet. We launch one NAT gateway in subnet one.
+
+  rNatGatewayOneAttachment:
+    Type: AWS::EC2::EIP
+    DependsOn: rGatewayAttachment
+    Properties:
+        Domain: vpc
+
+  rNatGatewayOne:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt rNatGatewayOneAttachment.AllocationId
+      SubnetId: !Ref rPublicSubnetOne
+
+  rPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'rVPC'
+
+  rPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref rNatGatewayOne
+
+  rPrivateSubnetOneRouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref rPrivateRouteTable
+      SubnetId: !Ref rPrivateSubnetOne
+
+  rPrivateSubnetTwoRouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref rPrivateRouteTable
+      SubnetId: !Ref rPrivateSubnetTwo
+
+
+  # ECS Resources
+  rECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref pEnvironment
+
+  rECSClusterParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Description: ESC Name
+      Name: esc-cluster-name
+      Type: String
+      Value: !Ref ECSCluster    
+
+  # A security group for the containers we will run in ECS.
+  # Rules are added to this security group based on what ingress you
+  # add for the cluster.
+  rContainerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the ECS hosts that run containers
+      VpcId: !Ref 'rVPC'
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          SourceSecurityGroupId: !Ref rPublicLoadBalancerSG
+
+  rContainerSecurityGroupIngressFromSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Ingress from other memebers of the same SG
+      GroupId: !Ref rContainerSecurityGroup
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref rContainerSecurityGroup
+
+  # Autoscaling group. This launches the actual EC2 instances that will register
+  # themselves as members of the cluster, and run the docker containers.
+  rECSAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn:
+      - rPrivateRoute
+      - rPrivateSubnetOneRouteTableAssoc
+      - rPrivateSubnetTwoRouteTableAssoc
+    Properties:
+      VPCZoneIdentifier:
+        - !Ref rPrivateSubnetOne
+        - !Ref rPrivateSubnetTwo
+      LaunchConfigurationName: !Ref 'rContainerInstances'
+      MinSize: '1'
+      MaxSize: !Ref 'pMaxSize'
+      DesiredCapacity: !Ref 'pDesiredCapacity'
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+    UpdatePolicy:
+      AutoScalingReplacingUpdate:
+        WillReplace: 'true'
+
+  rContainerInstances:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: !Ref 'pECSAMI'
+      SecurityGroups: [!Ref 'rContainerSecurityGroup']
+      InstanceType: !Ref 'pInstanceType'
+      IamInstanceProfile: !Ref 'rEC2InstanceProfile'
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          echo ECS_CLUSTER=${rECSCluster} >> /etc/ecs/ecs.config
+          yum install -y aws-cfn-bootstrap
+          yum install -y amazon-ssm-agent
+          systemctl enable amazon-ssm-agent
+          systemctl start amazon-ssm-agent
+          /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource rECSAutoScalingGroup --region ${AWS::Region}
+
+  rEC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles: [!Ref 'rEC2Role']
+
+  # A role used to allow AWS Autoscaling to inspect stats and adjust scalable targets
+  # on your AWS account
+  rAutoscalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [application-autoscaling.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: service-autoscaling
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - 'application-autoscaling:*'
+              - 'cloudwatch:DescribeAlarms'
+              - 'cloudwatch:PutMetricAlarm'
+              - 'ecs:DescribeServices'
+              - 'ecs:UpdateService'
+            Resource: '*'
+
+  # Role for the EC2 hosts. This allows the ECS agent on the EC2 hosts
+  # to communicate with the ECS control plane, as well as download the docker
+  # images from ECR to run on your host.
+  rEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [ec2.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+      - PolicyName: ecs-service
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - 'ec2messages:*'
+              - 'ecs:CreateCluster'
+              - 'ecs:DeregisterContainerInstance'
+              - 'ecs:DiscoverPollEndpoint'
+              - 'ecs:Poll'
+              - 'ecs:RegisterContainerInstance'
+              - 'ecs:StartTelemetrySession'
+              - 'ecs:Submit*'
+              - 'logs:CreateLogStream'
+              - 'logs:PutLogEvents'
+              - 'ecr:GetAuthorizationToken'
+              - 'ecr:BatchGetImage'
+              - 'ecr:GetDownloadUrlForLayer'
+            Resource: '*'
+
+
+  # Public load balancer, hosted in public subnets that is accessible
+  # to the public, and is intended to route traffic to one or more public
+  # facing services. This is used for accepting traffic from the public
+  # internet and directing it to public facing microservices
+
+
+  rPublicLoadBalancerSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the public facing load balancer
+      VpcId: !Ref rVPC
+      SecurityGroupIngress:
+          # Allow access to ALB from anywhere on the internet
+          - CidrIp: 0.0.0.0/0
+            IpProtocol: -1
+
+  rPublicLoadBalancer:
+    DependsOn: rGatewayAttachment
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Name: !Sub ${pEnvironment}-ALB
+      LoadBalancerAttributes:
+      - Key: idle_timeout.timeout_seconds
+        Value: '12'
+      Subnets:
+        # The load balancer is placed into the public subnets, so that traffic
+        # from the internet can reach the load balancer directly via the internet gateway
+        - !Ref rPublicSubnetOne
+        - !Ref rPublicSubnetTwo
+      SecurityGroups: [!Ref 'rPublicLoadBalancerSG']
+
+  # A dummy target group is used to setup the ALB to just drop traffic
+  # initially, before any real service target groups have been added.
+  rTargetGroupPublic:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${pEnvironment}-Def-TG
+      TargetType: ip
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200-299'
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 10
+      VpcId: !Ref rVPC
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: '5'
+      - Key: slow_start.duration_seconds
+        Value: '60'
+
+  rPublicLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - rPublicLoadBalancer
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'rTargetGroupPublic'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'rPublicLoadBalancer'
+      Port: 80
+      Protocol: HTTP
+      
+  rPublicLoadBalancerTestListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - rPublicLoadBalancer
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'rTargetGroupPublic'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'rPublicLoadBalancer'
+      Port: 8080
+      Protocol: HTTP
+################################################################################
+#
+#   OUTPUTS
+#   Describes the values that are returned whenever you view your stack's
+#   properties.
+#
+################################################################################
+# These are the values output by the CloudFormation template. Be careful
+# about changing any of them, because of them are exported with specific
+# names so that the other task related CF templates can use them.
+Outputs:
+  ClusterName:
+    Description: The name of the ECS cluster
+    Value: !Ref 'rECSCluster'
+    Export:
+      Name: !Sub ${pEnvironment}:ClusterName
+  AutoscalingRole:
+    Description: The ARN of the role used for autoscaling
+    Value: !GetAtt 'rAutoscalingRole.Arn'
+    Export:
+      Name: !Sub ${pEnvironment}:AutoscalingRole
+  VpcId:
+    Description: The ID of the VPC that this stack is deployed in
+    Value: !Ref 'rVPC'
+    Export:
+      Name: !Sub ${pEnvironment}:VpcId
+  PublicSubnetOne:
+    Description: Public subnet one
+    Value: !Ref 'rPublicSubnetOne'
+    Export:
+      Name: !Sub ${pEnvironment}:PublicSubnetOne
+  PublicSubnetTwo:
+    Description: Public subnet two
+    Value: !Ref 'rPublicSubnetTwo'
+    Export:
+      Name: !Sub ${pEnvironment}:PublicSubnetTwo
+  PrivateSubnetOne:
+    Description: Private subnet one
+    Value: !Ref 'rPrivateSubnetOne'
+    Export:
+      Name: !Sub ${pEnvironment}:PrivateSubnetOne
+  PrivateSubnetTwo:
+    Description: Private subnet two
+    Value: !Ref 'rPrivateSubnetTwo'
+    Export:
+      Name: !Sub ${pEnvironment}:PrivateSubnetTwo
+  ContainerSecurityGroup:
+    Description: A security group used to allow containers to receive traffic
+    Value: !Ref 'rContainerSecurityGroup'
+    Export:
+      Name: !Sub ${pEnvironment}:ContainerSecurityGroup
+  PublicListener:
+    Description: The ARN of the public load balancer's Listener
+    Value: !Ref rPublicLoadBalancerListener
+    Export:
+      Name: !Sub ${pEnvironment}:PublicListener
+  TestListener:
+    Description: The ARN of the public load balancer's test listener
+    Value: !Ref rPublicLoadBalancerTestListener
+    Export:
+      Name: !Sub ${pEnvironment}:TestListener  
+  ExternalUrl:
+    Description: The url of the external load balancer
+    Value: !Sub http://${rPublicLoadBalancer.DNSName}
+    Export:
+      Name: !Sub ${pEnvironment}:ExternalUrl

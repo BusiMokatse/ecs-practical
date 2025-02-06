@@ -219,9 +219,9 @@ Resources:
       Name: hello-server-build
       ServiceRole: !GetAtt rCodePipelineServiceRole.Arn
       LogsConfig: 
-         CloudWatchLogs: 
-           GroupName: codebuild/hello-server
-           Status : ENABLED 
+          CloudWatchLogs: 
+            GroupName: codebuild/hello-server
+            Status : ENABLED 
       Source:
         Type: CODEPIPELINE     
 

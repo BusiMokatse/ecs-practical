@@ -95,7 +95,6 @@ Parameters:
       the major, minor or patch number given a version number MAJOR.MINOR.PATCH.
     Default: 0.0.0
   pInstanceType:
-    Description: EC2 instance type
     Type: String
     Default: t3.micro
     Description: >- 
@@ -224,7 +223,7 @@ Resources:
   rVPC:
     Type: AWS::EC2::VPC
     Properties:
-      EnableDnsSupport: tru\
+      EnableDnsSupport: true
       EnableDnsHostnames: true
       CidrBlock: !FindInMap ['SubnetConfig', 'VPC', 'CIDR']
       Tags:
@@ -385,9 +384,9 @@ Resources:
     Type: AWS::SSM::Parameter
     Properties:
       Description: ESC Name
-      Name: esc-cluster-name
+      Name: ecs-cluster-name
       Type: String
-      Value: !Ref ECSCluster    
+      Value: !Ref rECSCluster    
 
   # A security group for the containers we will run in ECS.
   # Rules are added to this security group based on what ingress you
@@ -584,6 +583,14 @@ Resources:
       LoadBalancerArn: !Ref 'rPublicLoadBalancer'
       Port: 80
       Protocol: HTTP
+
+  rPublicListenerParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Description: Public Listener Name
+      Name: public-lb-listener
+      Type: String
+      Value: !Ref rPublicLoadBalancerListener   
       
   rPublicLoadBalancerTestListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
